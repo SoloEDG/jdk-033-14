@@ -5,6 +5,7 @@ import { useSail } from '../features/sail'
 import { useJury } from '../features/jury'
 import { useLogbook } from '../features/logbook'
 import type { Point, RaceEvent, RaceStatus, Sample } from '../shared/race'
+import { angleDelta, clamp, mix, normalize } from '../shared/math'
 
 const stepSize = .025
 const maxDuration = 600
@@ -58,24 +59,56 @@ export function useRace() {
     status.value = result
   }
   function tick() {
-    const from = sail.boat.value
-    const previousEvent = jury.events.value.at(-1)
-    const next = sail.step(live.value.wind, stepSize)
-    const verdict = jury.inspect(from.position, next.position, elapsed.value, stepSize)
-    sail.boat.value = verdict.blocked ? { ...next, position: from.position, knots: 0 } : next
-    elapsed.value += stepSize
+    const startedAt = elapsed.value
+    const fromBoat = sail.boat.value
+    const previousEventCount = jury.events.value.length
+    const nextBoat = sail.step(live.value.wind, stepSize)
+    const verdict = jury.inspect(fromBoat.position, nextBoat.position, startedAt, stepSize)
+
+    const encounter = verdict.finish ?? verdict.crossing ?? verdict.contact
+    const eventFraction = (time: number) => clamp((time - startedAt) / stepSize, 0, 1)
+    const interpolatedBoat = (time: number, position: Point, stopAtContact = false) => {
+      const fraction = eventFraction(time)
+      return {
+        ...nextBoat,
+        position: { ...position },
+        heading: normalize(fromBoat.heading + angleDelta(fromBoat.heading, nextBoat.heading) * fraction),
+        knots: stopAtContact ? 0 : mix(fromBoat.knots, nextBoat.knots, fraction),
+      }
+    }
+
+    if (verdict.blocked) {
+      const contactPosition = verdict.contact?.position ?? fromBoat.position
+      sail.boat.value = interpolatedBoat(verdict.contact?.time ?? startedAt, contactPosition, true)
+      if (verdict.contact) elapsed.value = verdict.contact.time
+      else elapsed.value = startedAt + stepSize
+    } else if (verdict.crossing) {
+      sail.boat.value = interpolatedBoat(verdict.crossing.time, verdict.crossing.position)
+      elapsed.value = verdict.crossing.time
+    } else {
+      sail.boat.value = nextBoat
+      elapsed.value = startedAt + stepSize
+    }
+
+    // Preserve the exact adjudication frame for replay. In particular, moving
+    // gate poses and cumulative penalty must be sampled at event.time.
+    for (const event of jury.events.value.slice(previousEventCount)) {
+      logbook.record({
+        time: event.time,
+        boat: interpolatedBoat(event.time, event.position, event.kind === 'collision'),
+        wind: wind.sample(event.time),
+        nextGate: event.nextGate ?? jury.nextGate.value,
+        penalty: event.totalPenalty ?? jury.penalty.value,
+      }, true)
+    }
+
     if (verdict.finish) {
       elapsed.value = verdict.finish.time
-      sail.boat.value = { ...next, position: verdict.finish.position }
+      sail.boat.value = interpolatedBoat(verdict.finish.time, verdict.finish.position)
       end('finished')
       return
     }
-    const event = jury.events.value.at(-1)
-    if (event && event !== previousEvent && event.kind === 'mark' && event.time < elapsed.value) {
-      logbook.record({ ...live.value, time: event.time, wind: wind.sample(event.time),
-        boat: { ...next, position: event.position } }, true)
-    }
-    logbook.record(live.value, event?.time === elapsed.value)
+    logbook.record(live.value, encounter ? Math.abs(live.value.time - encounter.time) < 1e-9 : false)
     if (elapsed.value >= maxDuration) end('abandoned')
   }
   function loop(now: number) {

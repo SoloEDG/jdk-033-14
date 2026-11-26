@@ -2,13 +2,19 @@
 import { computed } from 'vue'
 import { Anchor, Crosshair, LocateFixed } from 'lucide-vue-next'
 import type { Course, Point, Sample } from '../../../shared/race'
-import { buoyPosition, gateEnds } from '../lib/geometry'
+import { gateEnds, linePoseAt } from '../lib/geometry'
 import { pathFor, soundings } from '../lib/chartMarks'
 import BoatGlyph from './BoatGlyph.vue'
 
 const props = defineProps<{ course: Course; frame: Sample; trail: Point[]; replay: boolean; focus: Point | null }>()
 const route = computed(() => pathFor([props.course.start, ...props.course.gates.flatMap(gate => gate.approach ? [gate.approach.center, gate.center] : [gate.center])]))
 const trailPath = computed(() => pathFor(props.trail))
+const gateViews = computed(() => props.course.gates.map((gate, index) => {
+  const gateLine = linePoseAt(gate, 'gate', props.frame.time)!
+  const approachLine = linePoseAt(gate, 'approach', props.frame.time)
+  const buoy = gateEnds(gateLine)[gate.buoySide === -1 ? 0 : 1]
+  return { gate, index, gateLine, approachLine, buoy }
+}))
 </script>
 
 <template>
@@ -16,7 +22,7 @@ const trailPath = computed(() => pathFor(props.trail))
     <svg class="sea-chart" :viewBox="`0 0 ${course.size.x} ${course.size.y}`" role="img" aria-label="针岬湾航图与帆船">
       <defs>
         <pattern id="sea-grid" width="48" height="48" patternUnits="userSpaceOnUse"><path d="M48 0H0V48" fill="none" stroke="#8fb4b5" stroke-opacity=".22"/></pattern>
-        <pattern id="land-hatch" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><path d="M0 0V9" stroke="#b0a581" stroke-width="1" opacity=".43"/></pattern>
+        <pattern id="land-hatch" width="9" height="9" patternUnits="userSpaceOnUse"><path d="M0 0V9" stroke="#b0a581" stroke-width="1" opacity=".43"/></pattern>
       </defs>
       <rect width="960" height="570" fill="#27555b"/>
       <rect width="960" height="570" fill="url(#sea-grid)"/>
@@ -30,16 +36,55 @@ const trailPath = computed(() => pathFor(props.trail))
         <text :x="h.center.x" :y="h.center.y + 6" text-anchor="middle" :fill="h.radius > 100 ? '#292d2b' : '#e4dcc0'" class="water-text">{{ h.id }}</text>
       </g>
       <text v-for="depth in soundings" :key="depth.join(',')" :x="depth[0]" :y="depth[1]" fill="#a7c2bd" opacity=".55" class="depth">{{ depth[2] }}</text>
-      <path :d="route" fill="none" stroke="#d0c89c" stroke-width="1.6" stroke-dasharray="4 7" opacity=".63"/>
+      <path :d="route" fill="none" stroke="#d0c89c" stroke-width="1.6" stroke-dasharray="4 7" opacity=".45"/>
       <path :d="trailPath" fill="none" stroke="#e9f6ef" stroke-width="2" stroke-linejoin="round"/>
-      <g v-for="(gate, index) in course.gates" :key="gate.id" :opacity="index < frame.nextGate ? .42 : 1">
-        <line v-if="gate.approach" :x1="gateEnds(gate.approach)[0].x" :y1="gateEnds(gate.approach)[0].y" :x2="gateEnds(gate.approach)[1].x" :y2="gateEnds(gate.approach)[1].y" :stroke="index === frame.nextGate ? '#ffd455' : '#a6b7a9'" stroke-width="1.4" stroke-dasharray="2 6"/>
-        <line :x1="gateEnds(gate)[0].x" :y1="gateEnds(gate)[0].y" :x2="gateEnds(gate)[1].x" :y2="gateEnds(gate)[1].y" :stroke="index === frame.nextGate ? '#ffd455' : '#a6b7a9'" :stroke-width="index === frame.nextGate ? 2.6 : 1.3" stroke-dasharray="6 5"/>
-        <circle :cx="buoyPosition(gate).x" :cy="buoyPosition(gate).y" r="9.5" :fill="index === frame.nextGate ? '#ffd455' : '#e77c62'" stroke="#1c3a3c" stroke-width="2.2"/>
-        <circle :cx="gate.center.x" :cy="gate.center.y" r="3.6" :fill="index === frame.nextGate ? '#ffd455' : '#a6b7a9'"/>
-        <text :x="gate.center.x + 13" :y="gate.center.y - 12" :fill="index === frame.nextGate ? '#ffd455' : '#e5e1c2'" class="water-text">{{ gate.id }} {{ gate.name }}</text>
+      <g
+        v-for="view in gateViews"
+        :key="view.gate.id"
+        :data-gate-id="view.gate.id"
+        :data-moving="Boolean(view.gate.poseAt ?? view.gate.motion?.poseAt ?? view.gate.motion?.velocity)"
+        :data-testid="`gate-group-${view.gate.id}`"
+        :opacity="view.index < frame.nextGate ? .42 : 1"
+      >
+        <line
+          v-if="view.approachLine"
+          :x1="gateEnds(view.approachLine)[0].x"
+          :y1="gateEnds(view.approachLine)[0].y"
+          :x2="gateEnds(view.approachLine)[1].x"
+          :y2="gateEnds(view.approachLine)[1].y"
+          data-gate-line="approach"
+          :data-gate-id="view.gate.id"
+          data-testid="approach-line"
+          :stroke="view.index === frame.nextGate ? '#ffd455' : '#a6b7a9'"
+          stroke-width="1.4"
+          stroke-dasharray="2 6"
+        />
+        <line
+          :x1="gateEnds(view.gateLine)[0].x"
+          :y1="gateEnds(view.gateLine)[0].y"
+          :x2="gateEnds(view.gateLine)[1].x"
+          :y2="gateEnds(view.gateLine)[1].y"
+          data-gate-line="gate"
+          :data-gate-id="view.gate.id"
+          data-testid="gate-line"
+          :stroke="view.index === frame.nextGate ? '#ffd455' : '#a6b7a9'"
+          :stroke-width="view.index === frame.nextGate ? 2.6 : 1.3"
+          stroke-dasharray="6 5"
+        />
+        <circle
+          :cx="view.buoy.x"
+          :cy="view.buoy.y"
+          r="9.5"
+          data-testid="gate-buoy"
+          :data-gate-id="view.gate.id"
+          :fill="view.index === frame.nextGate ? '#ffd455' : '#e77c62'"
+          stroke="#1c3a3c"
+          stroke-width="2.2"
+        />
+        <circle :cx="view.gateLine.center.x" :cy="view.gateLine.center.y" r="3.6" :fill="view.index === frame.nextGate ? '#ffd455' : '#a6b7a9'"/>
+        <text :x="view.gateLine.center.x + 13" :y="view.gateLine.center.y - 12" :fill="view.index === frame.nextGate ? '#ffd455' : '#e5e1c2'" class="water-text">{{ view.gate.id }} {{ view.gate.name }}</text>
       </g>
-      <g v-if="focus" :transform="`translate(${focus.x} ${focus.y})`" stroke="#ffb44b" fill="none">
+      <g v-if="focus" :transform="`translate(${focus.x} ${focus.y})`" stroke="#ffb44b" fill="none" data-testid="event-focus">
         <circle r="17" stroke-width="2"/><path d="M-24 0h11m26 0h11M0-24v11m0 26v11"/>
       </g>
       <BoatGlyph :boat="frame.boat"/>
@@ -52,6 +97,6 @@ const trailPath = computed(() => pathFor(props.trail))
       </g>
     </svg>
     <div class="chart-tag"><Anchor :size="15"/><span>{{ course.name }}</span></div>
-    <div class="chart-state"><component :is="replay ? Crosshair : LocateFixed" :size="14"/>{{ replay ? '回看' : '实时' }}</div>
+    <div class="chart-state" data-testid="chart-clock"><component :is="replay ? Crosshair : LocateFixed" :size="14"/>{{ replay ? '回看' : '实时' }} · {{ frame.time.toFixed(2) }}s</div>
   </section>
 </template>

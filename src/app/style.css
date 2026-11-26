@@ -65,6 +65,7 @@ h2 > svg { color: #456969; flex: none; }
 .slider-label output, .penalty output { font: 13px var(--mono); }
 input[type=range] { width: 100%; margin: 5px 0 10px; accent-color: #39696a; }
 .marks h2 b { margin-left: auto; font: 12px var(--mono); color: #606657; }
+.moving-note { display: flex; align-items: center; gap: 5px; margin: 8px 0 0; color: #31585a; font-size: 11px; line-height: 1.35; }
 .marks ol { margin: 10px 0; padding: 0; list-style: none; }
 .marks li { display: grid; grid-template-columns: 23px 1fr 18px; align-items: center; gap: 5px; padding: 6px 5px; border-bottom: 1px solid #d9d2b9; font-size: 13px; }
 .marks li > span { font: 11px var(--mono); }
@@ -84,6 +85,8 @@ input[type=range] { width: 100%; margin: 5px 0 10px; accent-color: #39696a; }
 .event-list { display: flex; flex-direction: column; margin-top: 8px; max-height: 140px; overflow: auto; }
 .event-list button { display: flex; gap: 8px; min-height: 32px; align-items: center; text-align: left; padding: 5px; border: 0; border-top: 1px solid #d9d2b9; background: transparent; font-size: 12px; }
 .event-list button:hover { background: #ffe598; }
+.event-list button[data-kind="invalid"] { color: #8a5a16; }
+.event-list button[data-kind="invalid"] time { color: inherit; }
 .event-list time, .event-list b { font: 11px var(--mono); }
 .event-list b { margin-left: auto; color: #893b27; }
 @media (max-width: 800px) {
